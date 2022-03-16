@@ -7,8 +7,7 @@ import subprocess
 import tempfile
 import time
 
-lilypond_midi_score = Template(r'''
-\version "2.22.2"
+lilypond_midi_score = Template(r'''\version "2.22.2"
 
 \score {
   \new Staff {
@@ -28,11 +27,9 @@ lilypond_midi_score = Template(r'''
     }
   }
   \midi { }
-}
-''')
+}''')
 
-lilypond_layout_score = Template(r'''
-\version "2.22.2"
+lilypond_layout_score = Template(r'''\version "2.22.2"
 
 \paper {
   #(set-paper-size "a6landscape")
@@ -50,9 +47,7 @@ lilypond_layout_score = Template(r'''
     }
   }
   \layout { }
-}
-''')
-
+}''')
 
 
 def gen_beats(beats=4, note_values=(8, 6, 4, 3, 2, 1)):
@@ -95,7 +90,12 @@ def main():
         '-m', '--measures', type=int, default=4,
         help='number of measures in the rhythm (default: 4)'
     )
+    arg_parser.add_argument(
+        '-n', '--note-values', default="8,6,4,3,2,1",
+        help='note values to use in number of 8ths per note, comma separated'
+    )
     args = arg_parser.parse_args()
+    note_values = tuple(map(int, args.note_values.split(',')))
 
     with tempfile.TemporaryDirectory(prefix='rhythmic_dictation') as temp_dir:
         print(f'Created temporary directory {temp_dir}')
@@ -114,7 +114,7 @@ def main():
 
         notes = []
         for _ in range(measures):
-            notes.extend(gen_beats(beats=bpmeasure))
+            notes.extend(gen_beats(beats=bpmeasure, note_values=note_values))
 
         notes_lilypond = ' '.join(
             map(lambda n: 'c' + eighths_to_lilypond(n), notes)
@@ -132,7 +132,6 @@ def main():
         layout_score_file.flush()
         midi_score_file.write(midi_score_string)
         midi_score_file.flush()
-        input()
 
         subprocess.run(('lilypond', '--png', layout_score_fn), check=True,
                        cwd=temp_dir)
