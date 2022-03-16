@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+'''Simple application for practicing rhythmic dictation.'''
+
 import argparse
 import logging
 import pathlib
@@ -8,6 +10,8 @@ from string import Template
 import subprocess
 import sys
 import tempfile
+from typing import List, Sequence
+from typed_argparse import TypedArgs  # type: ignore
 
 lilypond_midi_score = Template(r'''\version "2.22.2"
 
@@ -52,12 +56,39 @@ lilypond_layout_score = Template(r'''\version "2.22.2"
 }''')
 
 
-def gen_beats(beats=4, note_values=(8, 6, 4, 3, 2, 1)):
-    # note that a quarter note always gets a beat here
+def gen_rhythm(beats: int = 4,
+               note_values: Sequence[int] = (8, 6, 4, 3, 2, 1)) -> Sequence[int]:
+    '''Generates a rhythm of the given length with the given note values.
+
+    Args:
+      beats: Length of the rhythm to generate in quarter notes (default 4)
+      note_values: The note values in 8th notes to use when generating the
+        rhythm. For instance, a quarter note's note value would be 2 (two
+        8th notes). (default (8, 6, 4, 3, 2, 1))
+
+    Returns:
+      A sequence of notes by their values in 8ths. For example, [1, 3] would
+      be an 8th note followed by a dotted quarter note.
+
+    Raises:
+      ValueError: It may not be possible to generate a rhythm of a given
+        length given specific note values. If that happens, this error
+        is raised.
+    '''
+
+    iter_max = 500
+
     notes = [0]
     eighths = beats * 2
     current_eighths = 0
+    iter_counter = 0
     while current_eighths != eighths:
+        iter_counter += 1
+        if iter_counter > iter_max:
+            raise ValueError(
+                'Given note values cannot create rhythm of the given length'
+            )
+
         current_eighths -= notes.pop()
 
         while current_eighths < eighths:
@@ -68,7 +99,21 @@ def gen_beats(beats=4, note_values=(8, 6, 4, 3, 2, 1)):
     return notes
 
 
-def eighths_to_lilypond(eighths):
+def eighths_to_lilypond(eighths: int) -> str:
+    '''Converts from note value in 8ths to lilypond note length.
+
+    Args:
+      note_values: The note valuein 8ths to convert. For example, a quarter
+        note's value would be 2.
+
+    Returns:
+      A sequence of notes by their values in 8ths. For example, [1, 3] would
+      be an 8th note followed by a dotted quarter note.
+
+    Raises:
+      KeyError: The given note value in 8ths does not have a single
+        note lilypond length equivalent.
+    '''
     eighths_to_vals = {
         8: '1',
         6: '2.',
@@ -80,64 +125,78 @@ def eighths_to_lilypond(eighths):
     return eighths_to_vals[eighths]
 
 
-def parse_args():
+class Arguments(TypedArgs):
+    '''Data class used to store parsed command line arguments.
+
+    Attributes:
+      tempo: Tempo at which to play back the generated rhythm.
+      measures: How long the generated rhythm should be.
+      note_values: Note values that can be used in the rhythm (in 8ths,
+        see gen_rhythm).
+      image_viewer: Path to an executable for an image viewer to use when
+        showing the correct answer (also searched for in PATH).
+      midi_player: Path to an executable for a midi player to use when
+        playing the rhythm (also searched for in PATH).
+      lilypond_path: Path to lilypond executable (also searched for in PATH).
+      verbose: Print non-warning/error log messages and subprocess output.
+    '''
+    tempo: int
+    measures: int
+    note_values: List[int]
+    image_viewer: str
+    midi_player: str
+    lilypond_path: str
+    verbose: bool
+
+
+def parse_args(args: List[str] = sys.argv[1:]) -> Arguments:
+    '''Parses command line arguments into Arguments data class.
+
+    Args:
+      args: List of command line arguments (not including arg 0).
+
+    Returns:
+      Arguments class containing parsed arguments. Additional validation should
+      be done on results, see validate_args.
+    '''
+
     arg_parser = argparse.ArgumentParser(
         description='Practice rhythmic dictation',
         usage='%(prog)s [options]'
     )
 
-    def tempo(arg):
-        iarg = int(arg)
-        if iarg < 1:
-            raise ValueError('Tempo must be greater than 0')
-        return iarg
     arg_parser.add_argument(
-        '-t', dest='tempo', type=tempo, default=80,
+        '-t', dest='tempo', type=int, default=80,
         help='tempo (bpm) used to play the rhythm (default: 80)'
     )
 
-    def measures(arg):
-        iarg = int(arg)
-        if iarg < 1:
-            raise ValueError('Number of measures must be greater than 0')
-        return iarg
     arg_parser.add_argument(
-        '-m', dest='measures', type=measures, default=4,
+        '-m', dest='measures', type=int, default=4,
         help='number of measures in the rhythm (default: 4)'
     )
 
     def note_values(arg):
-        valid_values = (8, 6, 4, 3, 2, 1)
-        try:
-            parsed = tuple(map(int, arg.split(',')))
-            if not all(map(lambda n: n in valid_values, parsed)):
-                raise ValueError(f'Note values must be one of {valid_values}')
-            return parsed
-        except ValueError as e:
-            raise ValueError(f'Invalid list of notes: {e.args}') from e
+        return list(map(int, arg.split(',')))
     arg_parser.add_argument(
         '-n', dest='note_values', default='8,6,4,3,2,1', type=note_values,
-        help='note values to use in number of 8ths per note, comma separated'
+        help=('note values to use in number of 8ths per note, comma '
+              'separated (default: 8,6,4,3,2,1)')
     )
 
-    def external_program(arg):
-        if shutil.which(arg) is None:
-            raise FileNotFoundError(f'external program {arg} not found')
-        return arg
-
     arg_parser.add_argument(
-        '--image-viewer', type=external_program, default='feh',
+        '--image-viewer', default='feh',
         help='program used to view correct answer (default: feh)'
     )
 
     arg_parser.add_argument(
-        '--midi-player', type=external_program, default='timidity',
+        '--midi-player', default='timidity',
         help='program used to play MIDI file of the rhythm (default: timidity)'
     )
 
     arg_parser.add_argument(
-        '--lilypond-path', type=external_program, default='lilypond',
-        help='location of lilypond executable (can be in PATH, default: lilypond)'
+        '--lilypond-path', default='lilypond',
+        help=('location of lilypond executable'
+              '(can be in PATH, default: lilypond)')
     )
 
     arg_parser.add_argument(
@@ -145,19 +204,66 @@ def parse_args():
         help='display debug messages and output of subprocesses'
     )
 
-    args = arg_parser.parse_args()
+    parsed_args = arg_parser.parse_args(args)
+
+    return Arguments(parsed_args)
+
+
+def validate_args(args: Arguments) -> Arguments:
+    '''Validates Arguments class for correctness.
+
+    The Arguments class returned by parse_args has data that is of the correct
+    types but is not necessarily semantically correct. For instance, tempo
+    should not be less than 1.
+
+    Args:
+      args: Arguments data class to validate.
+
+    Returns:
+      The same Arguments class passed in.
+
+    Raises:
+      ValueError: One of the values is semantically incorrect.
+      FileNotFoundError: A program executable is not found.
+    '''
+    if args.tempo < 1:
+        raise ValueError(f'Tempo {args.tempo} is not greater than 1')
+
+    if args.measures < 1:
+        raise ValueError(f'No. measures {args.measures} is not greater than 1')
+
+    valid_values = {8, 6, 4, 3, 2, 1}
+    if not all(map(lambda n: n in valid_values, args.note_values)):
+        raise ValueError(f'Note values must be one of {valid_values}')
+
+    if shutil.which(args.image_viewer) is None:
+        raise FileNotFoundError(f'Image viewer {args.image_viewer} not found')
+
+    if shutil.which(args.midi_player) is None:
+        raise FileNotFoundError(f'Midi player {args.midi_player} not found')
+
+    if shutil.which(args.lilypond_path) is None:
+        raise FileNotFoundError(
+            f'Lilypond executable could not be found at {args.lilypond_path}')
 
     return args
 
 
-def configure_logging():
+def configure_logging() -> None:
+    '''Configures the root logger.'''
     logging.basicConfig(format='%(levelname)s:%(message)s',
                         level=logging.DEBUG)
 
 
-def main():
+def main() -> int:
+    '''Main entrypoint of the script.
+
+    Returns:
+      Exit code.
+    '''
     configure_logging()
     args = parse_args()
+    validate_args(args)
 
     level = logging.WARNING
     if args.verbose:
@@ -186,9 +292,9 @@ def main():
         measures = args.measures
 
         logging.info('Generating notes ...')
-        notes = []
+        notes: List[int] = []
         for _ in range(measures):
-            notes.extend(gen_beats(beats=bpmeasure,
+            notes.extend(gen_rhythm(beats=bpmeasure,
                                    note_values=args.note_values))
 
         notes_lilypond = ' '.join(
@@ -227,8 +333,7 @@ def main():
             text=True
         )
 
-        again = True
-        while again:
+        while True:
             logging.info('Playing midi ...')
             subprocess.run(
                 (args.midi_player, 'midi_score.midi'),
