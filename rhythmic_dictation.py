@@ -7,13 +7,8 @@ import subprocess
 import tempfile
 import time
 
-
-lilypond_score = Template(r'''
+lilypond_midi_score = Template(r'''
 \version "2.22.2"
-
-\paper {
-  #(set-paper-size "a5landscape")
-}
 
 \score {
   \new Staff {
@@ -33,10 +28,31 @@ lilypond_score = Template(r'''
     }
   }
   \midi { }
-  \layout { }
-
 }
 ''')
+
+lilypond_layout_score = Template(r'''
+\version "2.22.2"
+
+\paper {
+  #(set-paper-size "a6landscape")
+}
+
+\score {
+  \new Staff {
+    \relative c' {
+      \tempo 4 = $tempo
+      \numericTimeSignature
+      \time $timeSignature
+      \set Staff.midiInstrument = "acoustic grand"
+      \voiceOne
+      $notes
+    }
+  }
+  \layout { }
+}
+''')
+
 
 
 def gen_beats(beats=4, note_values=(8, 6, 4, 3, 2, 1)):
@@ -71,43 +87,66 @@ def main():
     arg_parser = argparse.ArgumentParser(
         description='Practice rhythmic dictation'
     )
+    arg_parser.add_argument(
+        '-t', '--tempo', type=int, default=80,
+        help='tempo (bpm) used to play the rhythm (default: 80)'
+    )
+    arg_parser.add_argument(
+        '-m', '--measures', type=int, default=4,
+        help='number of measures in the rhythm (default: 4)'
+    )
+    args = arg_parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix='rhythmic_dictation') as temp_dir:
         print(f'Created temporary directory {temp_dir}')
 
-        score_fn = 'score.ly'
-        score_file = open(pathlib.Path(temp_dir) / score_fn, 'w',
-                          encoding='utf-8')
+        layout_score_fn = 'layout_score.ly'
+        layout_score_file = open(
+            pathlib.Path(temp_dir) / layout_score_fn, 'w', encoding='utf-8'
+        )
+        midi_score_fn = 'midi_score.ly'
+        midi_score_file = open(
+            pathlib.Path(temp_dir) / midi_score_fn, 'w', encoding='utf-8'
+        )
 
         bpmeasure = random.choice((2, 3, 4))
-        measures = 4
-        beats = bpmeasure * measures
+        measures = args.measures
 
-        notes = gen_beats(beats=beats)
         notes = []
         for _ in range(measures):
             notes.extend(gen_beats(beats=bpmeasure))
 
-        notes_lilypond = map(lambda n: 'c' + eighths_to_lilypond(n), notes)
-
-        score_string = lilypond_score.substitute(
-            tempo=60, timeSignature=f'{bpmeasure}/4',
-            notes=' '.join(notes_lilypond)
+        notes_lilypond = ' '.join(
+            map(lambda n: 'c' + eighths_to_lilypond(n), notes)
         )
-        score_file.write(score_string)
-        score_file.flush()
 
-        subprocess.run(('lilypond', '--png', score_fn), check=True,
+        layout_score_string = lilypond_layout_score.substitute(
+            tempo=args.tempo, timeSignature=f'{bpmeasure}/4',
+            notes=notes_lilypond
+        )
+        midi_score_string = lilypond_midi_score.substitute(
+            tempo=args.tempo, timeSignature=f'{bpmeasure}/4',
+            notes=notes_lilypond
+        )
+        layout_score_file.write(layout_score_string)
+        layout_score_file.flush()
+        midi_score_file.write(midi_score_string)
+        midi_score_file.flush()
+        input()
+
+        subprocess.run(('lilypond', '--png', layout_score_fn), check=True,
                        cwd=temp_dir)
+        subprocess.run(('lilypond', midi_score_fn), check=True, cwd=temp_dir)
 
-        # for _ in range(3):
-        #     subprocess.run(('timidity', 'score.midi'), check=True,
-        #                    cwd=temp_dir)
-        #     time.sleep(5)
+        for _ in range(3):
+            subprocess.run(('timidity', 'midi_score.midi'), check=True,
+                           cwd=temp_dir)
+            time.sleep(5)
 
-        subprocess.run(('feh', 'score.png'), check=True, cwd=temp_dir)
+        subprocess.run(('feh', 'layout_score.png'), check=True, cwd=temp_dir)
 
-        score_file.close()
+        layout_score_file.close()
+        midi_score_file.close()
 
 
 if __name__ == '__main__':
