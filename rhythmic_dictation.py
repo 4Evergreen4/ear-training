@@ -4,6 +4,7 @@ import pathlib
 import random
 from string import Template
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -78,24 +79,62 @@ def eighths_to_lilypond(eighths):
     return eighths_to_vals[eighths]
 
 
-def main():
+def parse_args():
     arg_parser = argparse.ArgumentParser(
         description='Practice rhythmic dictation'
     )
+
+    def tempo(arg):
+        iarg = int(arg)
+        if iarg < 1:
+            raise ValueError('Tempo must be greater than 0')
+        return iarg
     arg_parser.add_argument(
-        '-t', '--tempo', type=int, default=80,
+        '-t', '--tempo', type=tempo, default=80,
         help='tempo (bpm) used to play the rhythm (default: 80)'
     )
+
+    def measures(arg):
+        iarg = int(arg)
+        if iarg < 1:
+            raise ValueError('Number of measures must be greater than 0')
+        return iarg
     arg_parser.add_argument(
-        '-m', '--measures', type=int, default=4,
+        '-m', '--measures', type=measures, default=4,
         help='number of measures in the rhythm (default: 4)'
     )
+
+    def note_values(arg):
+        try:
+            parsed = tuple(map(int, arg.split(',')))
+            if not all(map(lambda n: n >= 1, parsed)):
+                raise ValueError('Note values be greater than or equal to 1')
+            return parsed
+        except ValueError as e:
+            raise ValueError(f'Invalid list of notes: {e.args}') from e
     arg_parser.add_argument(
-        '-n', '--note-values', default="8,6,4,3,2,1",
+        '-n', '--note-values', default='8,6,4,3,2,1', type=note_values,
         help='note values to use in number of 8ths per note, comma separated'
     )
+
+    arg_parser.add_argument(
+        '-v', '--verbose', action='store_true',
+        help='display output of subprocesses'
+    )
+
     args = arg_parser.parse_args()
-    note_values = tuple(map(int, args.note_values.split(',')))
+
+    return args
+
+
+def main():
+    args = parse_args()
+
+    out = None
+    err = None
+    if not args.verbose:
+        out = subprocess.DEVNULL
+        err = subprocess.DEVNULL
 
     with tempfile.TemporaryDirectory(prefix='rhythmic_dictation') as temp_dir:
         print(f'Created temporary directory {temp_dir}')
@@ -114,7 +153,8 @@ def main():
 
         notes = []
         for _ in range(measures):
-            notes.extend(gen_beats(beats=bpmeasure, note_values=note_values))
+            notes.extend(gen_beats(beats=bpmeasure,
+                                   note_values=args.note_values))
 
         notes_lilypond = ' '.join(
             map(lambda n: 'c' + eighths_to_lilypond(n), notes)
@@ -133,13 +173,32 @@ def main():
         midi_score_file.write(midi_score_string)
         midi_score_file.flush()
 
-        subprocess.run(('lilypond', '--png', layout_score_fn), check=True,
-                       cwd=temp_dir)
-        subprocess.run(('lilypond', midi_score_fn), check=True, cwd=temp_dir)
+        subprocess.run(
+            ('lilypond', '--png', layout_score_fn),
+            check=True,
+            cwd=temp_dir,
+            stdout=out,
+            stderr=err,
+            text=True
+        )
+        subprocess.run(
+            ('lilypond', midi_score_fn),
+            check=True,
+            cwd=temp_dir,
+            stdout=out,
+            stderr=err,
+            text=True
+        )
 
         for _ in range(3):
-            subprocess.run(('timidity', 'midi_score.midi'), check=True,
-                           cwd=temp_dir)
+            subprocess.run(
+                ('timidity', 'midi_score.midi'),
+                check=True,
+                cwd=temp_dir,
+                stdout=out,
+                stderr=err,
+                text=True
+            )
             time.sleep(5)
 
         subprocess.run(('feh', 'layout_score.png'), check=True, cwd=temp_dir)
@@ -149,4 +208,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
