@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import logging
 import pathlib
 import random
+import shutil
 from string import Template
 import subprocess
 import sys
 import tempfile
-import time
 
 lilypond_midi_score = Template(r'''\version "2.22.2"
 
@@ -81,7 +82,8 @@ def eighths_to_lilypond(eighths):
 
 def parse_args():
     arg_parser = argparse.ArgumentParser(
-        description='Practice rhythmic dictation'
+        description='Practice rhythmic dictation',
+        usage='%(prog)s [options]'
     )
 
     def tempo(arg):
@@ -90,7 +92,7 @@ def parse_args():
             raise ValueError('Tempo must be greater than 0')
         return iarg
     arg_parser.add_argument(
-        '-t', '--tempo', type=tempo, default=80,
+        '-t', dest='tempo', type=tempo, default=80,
         help='tempo (bpm) used to play the rhythm (default: 80)'
     )
 
@@ -100,26 +102,47 @@ def parse_args():
             raise ValueError('Number of measures must be greater than 0')
         return iarg
     arg_parser.add_argument(
-        '-m', '--measures', type=measures, default=4,
+        '-m', dest='measures', type=measures, default=4,
         help='number of measures in the rhythm (default: 4)'
     )
 
     def note_values(arg):
+        valid_values = (8, 6, 4, 3, 2, 1)
         try:
             parsed = tuple(map(int, arg.split(',')))
-            if not all(map(lambda n: n >= 1, parsed)):
-                raise ValueError('Note values be greater than or equal to 1')
+            if not all(map(lambda n: n in valid_values, parsed)):
+                raise ValueError(f'Note values must be one of {valid_values}')
             return parsed
         except ValueError as e:
             raise ValueError(f'Invalid list of notes: {e.args}') from e
     arg_parser.add_argument(
-        '-n', '--note-values', default='8,6,4,3,2,1', type=note_values,
+        '-n', dest='note_values', default='8,6,4,3,2,1', type=note_values,
         help='note values to use in number of 8ths per note, comma separated'
+    )
+
+    def external_program(arg):
+        if shutil.which(arg) is None:
+            raise FileNotFoundError(f'external program {arg} not found')
+        return arg
+
+    arg_parser.add_argument(
+        '--image-viewer', type=external_program, default='feh',
+        help='program used to view correct answer (default: feh)'
+    )
+
+    arg_parser.add_argument(
+        '--midi-player', type=external_program, default='timidity',
+        help='program used to play MIDI file of the rhythm (default: timidity)'
+    )
+
+    arg_parser.add_argument(
+        '--lilypond-path', type=external_program, default='lilypond',
+        help='location of lilypond executable (can be in PATH, default: lilypond)'
     )
 
     arg_parser.add_argument(
         '-v', '--verbose', action='store_true',
-        help='display output of subprocesses'
+        help='display debug messages and output of subprocesses'
     )
 
     args = arg_parser.parse_args()
@@ -127,8 +150,19 @@ def parse_args():
     return args
 
 
+def configure_logging():
+    logging.basicConfig(format='%(levelname)s:%(message)s',
+                        level=logging.DEBUG)
+
+
 def main():
+    configure_logging()
     args = parse_args()
+
+    level = logging.WARNING
+    if args.verbose:
+        level = logging.DEBUG
+    logging.getLogger().setLevel(level)
 
     out = None
     err = None
@@ -137,20 +171,21 @@ def main():
         err = subprocess.DEVNULL
 
     with tempfile.TemporaryDirectory(prefix='rhythmic_dictation') as temp_dir:
-        print(f'Created temporary directory {temp_dir}')
+        logging.info('Created temporary directory %s', temp_dir)
 
-        layout_score_fn = 'layout_score.ly'
-        layout_score_file = open(
-            pathlib.Path(temp_dir) / layout_score_fn, 'w', encoding='utf-8'
-        )
-        midi_score_fn = 'midi_score.ly'
-        midi_score_file = open(
-            pathlib.Path(temp_dir) / midi_score_fn, 'w', encoding='utf-8'
-        )
+        layout_score_fn = pathlib.Path(temp_dir) / 'layout_score.ly'
+        layout_score_file = open(layout_score_fn, 'w', encoding='utf-8')
+        logging.info('Created layout lilypond score file %s',
+                     layout_score_fn)
+        midi_score_fn = pathlib.Path(temp_dir) / 'midi_score.ly'
+        midi_score_file = open(midi_score_fn, 'w', encoding='utf-8')
+        logging.info('Created lilypond score file for MIDI output %s',
+                     midi_score_fn)
 
         bpmeasure = random.choice((2, 3, 4))
         measures = args.measures
 
+        logging.info('Generating notes ...')
         notes = []
         for _ in range(measures):
             notes.extend(gen_beats(beats=bpmeasure,
@@ -173,16 +208,18 @@ def main():
         midi_score_file.write(midi_score_string)
         midi_score_file.flush()
 
+        logging.info('Converting %s to image ...', layout_score_fn)
         subprocess.run(
-            ('lilypond', '--png', layout_score_fn),
+            (args.lilypond_path, '--png', layout_score_fn),
             check=True,
             cwd=temp_dir,
             stdout=out,
             stderr=err,
             text=True
         )
+        logging.info('Converting %s to midi ...', midi_score_fn)
         subprocess.run(
-            ('lilypond', midi_score_fn),
+            (args.lilypond_path, midi_score_fn),
             check=True,
             cwd=temp_dir,
             stdout=out,
@@ -190,21 +227,29 @@ def main():
             text=True
         )
 
-        for _ in range(3):
+        again = True
+        while again:
+            logging.info('Playing midi ...')
             subprocess.run(
-                ('timidity', 'midi_score.midi'),
+                (args.midi_player, 'midi_score.midi'),
                 check=True,
                 cwd=temp_dir,
                 stdout=out,
                 stderr=err,
                 text=True
             )
-            time.sleep(5)
+            again = input('Listen again (y/n)? ')
+            if again.lower() == 'n':
+                break
 
-        subprocess.run(('feh', 'layout_score.png'), check=True, cwd=temp_dir)
+        logging.info('Showing correct answer')
+        subprocess.run((args.image_viewer, 'layout_score.png'), check=True,
+                       cwd=temp_dir, stdout=out, stderr=err, text=True)
 
         layout_score_file.close()
         midi_score_file.close()
+
+    return 0
 
 
 if __name__ == '__main__':
