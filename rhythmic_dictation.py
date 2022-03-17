@@ -357,11 +357,11 @@ def main() -> int:
                 break
 
         logging.info('Showing correct answer')
-        subprocess.run((args.image_viewer, 'layout_score.png'), check=True,
-                       cwd=temp_dir, stdout=out, stderr=err, text=True)
-
-        layout_score_file.close()
-        midi_score_file.close()
+        try:
+            subprocess.run((args.image_viewer, 'layout_score.png'), check=True,
+                           cwd=temp_dir, stdout=out, stderr=err, text=True)
+        except KeyboardInterrupt:
+            pass
 
     return 0
 
