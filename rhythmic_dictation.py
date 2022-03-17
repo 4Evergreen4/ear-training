@@ -2,6 +2,7 @@
 '''Simple application for practicing rhythmic dictation.'''
 
 import argparse
+from contextlib import ExitStack
 import logging
 import pathlib
 import random
@@ -276,15 +277,23 @@ def main() -> int:
         out = subprocess.DEVNULL
         err = subprocess.DEVNULL
 
-    with tempfile.TemporaryDirectory(prefix='rhythmic_dictation') as temp_dir:
+    with ExitStack() as exit_stack:
+        temp_dir = exit_stack.enter_context(
+            tempfile.TemporaryDirectory(prefix='rhythmic_dictation')
+        )
         logging.info('Created temporary directory %s', temp_dir)
 
         layout_score_fn = pathlib.Path(temp_dir) / 'layout_score.ly'
-        layout_score_file = open(layout_score_fn, 'w', encoding='utf-8')
+        layout_score_file = exit_stack.enter_context(
+            open(layout_score_fn, 'w', encoding='utf-8')
+        )
+
         logging.info('Created layout lilypond score file %s',
                      layout_score_fn)
         midi_score_fn = pathlib.Path(temp_dir) / 'midi_score.ly'
-        midi_score_file = open(midi_score_fn, 'w', encoding='utf-8')
+        midi_score_file = exit_stack.enter_context(
+            open(midi_score_fn, 'w', encoding='utf-8')
+        )
         logging.info('Created lilypond score file for MIDI output %s',
                      midi_score_fn)
 
@@ -295,7 +304,7 @@ def main() -> int:
         notes: List[int] = []
         for _ in range(measures):
             notes.extend(gen_rhythm(beats=bpmeasure,
-                                   note_values=args.note_values))
+                                    note_values=args.note_values))
 
         notes_lilypond = ' '.join(
             map(lambda n: 'c' + eighths_to_lilypond(n), notes)
