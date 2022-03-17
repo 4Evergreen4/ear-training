@@ -14,10 +14,11 @@ installed. The default midi player is `timidity` and the default image viewer
 is `feh`. You can change the paths to all three of these in the command line
 options.
 
-Second run this tool, first clone this repository. Then, create a python
-virtual env and run `pip3 install -r requirements` inside the virtual env.
-Finally, run `python3 rhythmic_dictation.py` inside the virtual env to run the
-tool.
+Second, you will need to have Python 3.7 at minimum.
+
+Third, clone this repository. Then, create a python virtual env and run
+`pip3 install -r requirements` inside the virtual env. Finally, run
+`python3 rhythmic_dictation.py` inside the virtual env to run the program.
 
 ## Options
 
