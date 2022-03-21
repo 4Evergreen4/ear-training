@@ -11,7 +11,7 @@ from string import Template
 import subprocess
 import sys
 import tempfile
-from typing import List, Sequence
+from typing import Optional, List, Sequence
 from typed_argparse import TypedArgs  # type: ignore
 
 lilypond_midi_score = Template(
@@ -137,6 +137,7 @@ class Arguments(TypedArgs):
     Attributes:
       tempo: Tempo at which to play back the generated rhythm.
       measures: How long the generated rhythm should be.
+      bpmeasure: How many beats should be in a measure
       note_values: Note values that can be used in the rhythm (in 8ths,
         see gen_rhythm).
       image_viewer: Path to an executable for an image viewer to use when
@@ -149,6 +150,7 @@ class Arguments(TypedArgs):
 
     tempo: int
     measures: int
+    bpmeasure: Optional[int]
     note_values: List[int]
     image_viewer: str
     midi_player: str
@@ -185,6 +187,12 @@ def parse_args(args: List[str]) -> Arguments:
         type=int,
         default=4,
         help="number of measures in the rhythm (default: 4)",
+    )
+    arg_parser.add_argument(
+        "-b",
+        dest="bpmeasure",
+        type=int,
+        help="number of beats in a measure (default: random choice of 2, 3, or 4)",
     )
 
     def note_values(arg):
@@ -254,6 +262,9 @@ def validate_args(args: Arguments) -> Arguments:
     if args.measures < 1:
         raise ValueError(f"No. measures {args.measures} is not greater than 1")
 
+    if args.bpmeasure is not None and args.bpmeasure < 1:
+        raise ValueError(f"No. measures {args.measures} is not greater than 1")
+
     valid_values = {8, 6, 4, 3, 2, 1}
     if not all(map(lambda n: n in valid_values, args.note_values)):
         raise ValueError(f"Note values must be one of {valid_values}")
@@ -307,7 +318,10 @@ def practice_round(args: Arguments) -> None:
         )
         logging.info("Created lilypond score file for MIDI output %s", midi_score_fn)
 
-        bpmeasure = random.choice((2, 3, 4))
+        if args.bpmeasure is None:
+            bpmeasure = random.choice((2, 3, 4))
+        else:
+            bpmeasure = args.bpmeasure
         measures = args.measures
 
         logging.info("Generating notes ...")
