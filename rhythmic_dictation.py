@@ -29,7 +29,7 @@ lilypond_midi_score = Template(
       c' c c c
 
       \time $timeSignature
-      \set Staff.midiInstrument = "acoustic grand"
+      \set Staff.midiInstrument = "$midiInstrument"
       \voiceOne
       $notes
     }
@@ -51,7 +51,6 @@ lilypond_layout_score = Template(
       \tempo 4 = $tempo
       \numericTimeSignature
       \time $timeSignature
-      \set Staff.midiInstrument = "acoustic grand"
       \voiceOne
       $notes
     }
@@ -140,6 +139,8 @@ class Arguments(TypedArgs):
       bpmeasure: How many beats should be in a measure
       note_values: Note values that can be used in the rhythm (in 8ths,
         see gen_rhythm).
+      midi_instrument: MIDI instrument used to play rhythm. See
+        https://lilypond.org/doc/v2.22/Documentation/notation/midi-instruments
       image_viewer: Path to an executable for an image viewer to use when
         showing the correct answer (also searched for in PATH).
       midi_player: Path to an executable for a midi player to use when
@@ -152,6 +153,7 @@ class Arguments(TypedArgs):
     measures: int
     bpmeasure: Optional[int]
     note_values: List[int]
+    midi_instrument: str
     image_viewer: str
     midi_player: str
     lilypond_path: str
@@ -206,6 +208,17 @@ def parse_args(args: List[str]) -> Arguments:
         help=(
             "note values to use in number of 8ths per note, comma "
             "separated (default: 8,6,4,3,2,1)"
+        ),
+    )
+
+    arg_parser.add_argument(
+        "--midi-instrument",
+        dest="midi_instrument",
+        default="acoustic grand",
+        help=(
+            "midi instrument used to play rhythm, see: "
+            "https://lilypond.org/doc/v2.22/Documentation/notation/midi-instruments "
+            " (default: acoustic grand)"
         ),
     )
 
@@ -268,6 +281,8 @@ def validate_args(args: Arguments) -> Arguments:
     valid_values = {8, 6, 4, 3, 2, 1}
     if not all(map(lambda n: n in valid_values, args.note_values)):
         raise ValueError(f"Note values must be one of {valid_values}")
+
+    # TODO: probably need to validate args.midi_instrument
 
     if shutil.which(args.image_viewer) is None:
         raise FileNotFoundError(f"Image viewer {args.image_viewer} not found")
@@ -335,7 +350,10 @@ def practice_round(args: Arguments) -> None:
             tempo=args.tempo, timeSignature=f"{bpmeasure}/4", notes=notes_lilypond
         )
         midi_score_string = lilypond_midi_score.substitute(
-            tempo=args.tempo, timeSignature=f"{bpmeasure}/4", notes=notes_lilypond
+            tempo=args.tempo,
+            timeSignature=f"{bpmeasure}/4",
+            notes=notes_lilypond,
+            midiInstrument=args.midi_instrument,
         )
         layout_score_file.write(layout_score_string)
         layout_score_file.flush()
