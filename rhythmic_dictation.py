@@ -277,21 +277,12 @@ def configure_logging() -> None:
     logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
 
 
-def main() -> int:
-    """Main entrypoint of the script.
+def practice_round(args: Arguments) -> None:
+    """Runs a single round of rhythmic dictation practice.
 
-    Returns:
-      Exit code.
+    Args:
+      args: Arguments to the program as returned by parse_args
     """
-    configure_logging()
-    args = parse_args(sys.argv[1:])
-    validate_args(args)
-
-    level = logging.WARNING
-    if args.verbose:
-        level = logging.DEBUG
-    logging.getLogger().setLevel(level)
-
     out = None
     err = None
     if not args.verbose:
@@ -382,6 +373,29 @@ def main() -> int:
             )
         except KeyboardInterrupt:
             pass
+
+
+def main() -> int:
+    """Main entrypoint of the script.
+
+    Returns:
+      Exit code.
+    """
+    configure_logging()
+    args = parse_args(sys.argv[1:])
+    validate_args(args)
+
+    level = logging.WARNING
+    if args.verbose:
+        level = logging.DEBUG
+    logging.getLogger().setLevel(level)
+
+    while True:
+        practice_round(args)
+
+        again = input("Do another (y/n)? ")
+        if again.lower() == "n":
+            break
 
     return 0
 
