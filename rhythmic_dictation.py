@@ -11,7 +11,7 @@ from string import Template
 import subprocess
 import sys
 import tempfile
-from typing import Optional, List, Sequence
+from typing import Optional, List, Sequence, Tuple
 from typed_argparse import TypedArgs  # type: ignore
 
 lilypond_midi_score = Template(
@@ -47,7 +47,7 @@ lilypond_layout_score = Template(
 
 \score {
   \new Staff {
-    \relative c' {
+    \relative a' {
       \tempo 4 = $tempo
       \numericTimeSignature
       \time $timeSignature
@@ -61,73 +61,94 @@ lilypond_layout_score = Template(
 
 
 def gen_rhythm(
-    beats: int = 4, note_values: Sequence[int] = (8, 6, 4, 3, 2, 1)
+    beats: int = 4,
+    note_values: Sequence[int] = (16, 12, 8, 6, 4, 2),
 ) -> Sequence[int]:
-    """Generates a rhythm of the given length with the given note values.
+    """Generates a rhythm of the given length with the given durations.
 
     Args:
-      beats: Length of the rhythm to generate in quarter notes (default 4)
-      note_values: The note values in 8th notes to use when generating the
-        rhythm. For instance, a quarter note's note value would be 2 (two
-        8th notes). (default (8, 6, 4, 3, 2, 1))
+      beats: Length of the rhythm to generate in quarters (default 4)
+      note_values: The durations in 16ths to use when generating the rhythm.
+        For instance, a quarter's duration would be 4 (four 16ths).
+        (default (16, 12, 8, 6, 4, 2))
 
     Returns:
-      A sequence of notes by their values in 8ths. For example, [1, 3] would
-      be an 8th note followed by a dotted quarter note.
+      A sequence of durations in 16ths. For example, [2, 6] would be an 8th
+      followed by a dotted quarter.
 
     Raises:
       ValueError: It may not be possible to generate a rhythm of a given
-        length given specific note values. If that happens, this error
-        is raised.
+        length given specific durations. If that happens, this error is raised.
     """
 
     iter_max = 500
 
     notes = [0]
-    eighths = beats * 2
-    current_eighths = 0
+    sixteenths = beats * 4
+    current_sixteenths = 0
     iter_counter = 0
-    while current_eighths != eighths:
+    while current_sixteenths != sixteenths:
         iter_counter += 1
         if iter_counter > iter_max:
             raise ValueError(
                 "Given note values cannot create rhythm of the given length"
             )
 
-        current_eighths -= notes.pop()
+        current_sixteenths -= notes.pop()
 
-        while current_eighths < eighths:
+        while current_sixteenths < sixteenths:
             note_val = random.choice(note_values)
             notes.append(note_val)
-            current_eighths += note_val
+            current_sixteenths += note_val
 
     return notes
 
 
-def eighths_to_lilypond(eighths: int) -> str:
-    """Converts from note value in 8ths to lilypond note length.
+def sixteenths_to_rests(sixteenths: int) -> Sequence[int]:
+    """Splits a note value in sixteenths into valid rest note values.
 
     Args:
-      note_values: The note valuein 8ths to convert. For example, a quarter
-        note's value would be 2.
+      sixteenths: The note value to split.
 
     Returns:
-      A sequence of notes by their values in 8ths. For example, [1, 3] would
-      be an 8th note followed by a dotted quarter note.
+      A tuple of the note values of rests that add up to the original note
+      value.
+    """
+    rests = {
+        12: (4, 8),
+        6: (2, 4),
+    }
+
+    if sixteenths in rests:
+        return rests[sixteenths]
+
+    return (sixteenths,)
+
+
+def sixteenths_to_lilypond(sixteenths: int) -> str:
+    """Converts from note value in 16ths to lilypond's string representation.
+
+    Args:
+      note_values: The note valuein 16ths to convert. For example, a quarter
+        note's value would be 4.
+
+    Returns:
+      The lilypond string representation of the given note value.
 
     Raises:
-      KeyError: The given note value in 8ths does not have a single
+      KeyError: The given note value in 16ths does not have a single
         note lilypond length equivalent.
     """
-    eighths_to_vals = {
-        8: "1",
-        6: "2.",
-        4: "2",
-        3: "4.",
-        2: "4",
-        1: "8",
+    sixteenths_to_vals = {
+        16: "1",
+        12: "2.",
+        8: "2",
+        6: "4.",
+        4: "4",
+        2: "8",
+        1: "16",
     }
-    return eighths_to_vals[eighths]
+    return sixteenths_to_vals[sixteenths]
 
 
 class Arguments(TypedArgs):
@@ -137,8 +158,10 @@ class Arguments(TypedArgs):
       tempo: Tempo at which to play back the generated rhythm.
       measures: How long the generated rhythm should be.
       bpmeasure: How many beats should be in a measure
-      note_values: Note values that can be used in the rhythm (in 8ths,
+      note_values: Note values that can be used in the rhythm (in 16ths,
         see gen_rhythm).
+      num_rests: The total number of rests to include. If there end up being
+        more rests than notes, the generated rhythm will be all rests.
       midi_instrument: MIDI instrument used to play rhythm. See
         https://lilypond.org/doc/v2.22/Documentation/notation/midi-instruments
       image_viewer: Path to an executable for an image viewer to use when
@@ -153,6 +176,7 @@ class Arguments(TypedArgs):
     measures: int
     bpmeasure: Optional[int]
     note_values: List[int]
+    num_rests: int
     midi_instrument: str
     image_viewer: str
     midi_player: str
@@ -203,11 +227,22 @@ def parse_args(args: List[str]) -> Arguments:
     arg_parser.add_argument(
         "-n",
         dest="note_values",
-        default="8,6,4,3,2,1",
+        default="16,8,6,4,2",
         type=note_values,
         help=(
-            "note values to use in number of 8ths per note, comma "
-            "separated (default: 8,6,4,3,2,1)"
+            "note values to use in number of 16ths per note, comma "
+            "separated (default: 16,8,6,4,2)"
+        ),
+    )
+
+    arg_parser.add_argument(
+        "-r",
+        dest="num_rests",
+        type=int,
+        default=0,
+        help=(
+            "number of rests to include; if there are more rests than notes, "
+            "all notes will be replaced with rests (default: 0)"
         ),
     )
 
@@ -278,9 +313,12 @@ def validate_args(args: Arguments) -> Arguments:
     if args.bpmeasure is not None and args.bpmeasure < 1:
         raise ValueError(f"No. measures {args.measures} is not greater than 1")
 
-    valid_values = {8, 6, 4, 3, 2, 1}
+    valid_values = {16, 12, 8, 6, 4, 2, 1}
     if not all(map(lambda n: n in valid_values, args.note_values)):
         raise ValueError(f"Note values must be one of {valid_values}")
+
+    if args.num_rests < 0:
+        raise ValueError("Number of rests must be greater than or equal to 0")
 
     # TODO: probably need to validate args.midi_instrument
 
@@ -339,20 +377,37 @@ def practice_round(args: Arguments) -> None:
             bpmeasure = args.bpmeasure
         measures = args.measures
 
-        logging.info("Generating notes ...")
+        logging.info("Generating note durations ...")
         notes: List[int] = []
         for _ in range(measures):
             notes.extend(gen_rhythm(beats=bpmeasure, note_values=args.note_values))
 
-        notes_lilypond = " ".join(map(lambda n: "c" + eighths_to_lilypond(n), notes))
+        logging.info("Adding rests ...")
+        non_rests = list(range(len(notes)))
+        rests = set()
+        for _ in range(args.num_rests):
+            rest_index = random.choice(non_rests)
+            rests.add(rest_index)
+            non_rests.remove(rest_index)
+
+        notes_lilypond = []
+        for i, note in enumerate(notes):
+            if i in rests:
+                rest_vals = sixteenths_to_rests(note)
+                for val in rest_vals:
+                    notes_lilypond.append("r" + sixteenths_to_lilypond(val))
+            else:
+                notes_lilypond.append("a" + sixteenths_to_lilypond(note))
+
+        notes_lilypond_str = " ".join(notes_lilypond)
 
         layout_score_string = lilypond_layout_score.substitute(
-            tempo=args.tempo, timeSignature=f"{bpmeasure}/4", notes=notes_lilypond
+            tempo=args.tempo, timeSignature=f"{bpmeasure}/4", notes=notes_lilypond_str
         )
         midi_score_string = lilypond_midi_score.substitute(
             tempo=args.tempo,
             timeSignature=f"{bpmeasure}/4",
-            notes=notes_lilypond,
+            notes=notes_lilypond_str,
             midiInstrument=args.midi_instrument,
         )
         layout_score_file.write(layout_score_string)
